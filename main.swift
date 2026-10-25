@@ -15,14 +15,20 @@ func L(_ ko: String, _ en: String) -> String { isKorean ? ko : en }
 struct WebItem { let label: String; let percent: Int; let reset: String? }
 
 func parsePlan(_ text: String) -> String? {
-    let re = try! NSRegularExpression(pattern: "^(Free|Pro|Max(\\s*\\d+x)?|Team|Enterprise)$", options: .caseInsensitive)
-    return text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-        .first { re.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil }
+    let re = try! NSRegularExpression(pattern: "^(Free|Pro|Max(\\s*\\(?\\d+x\\)?)?|Team|Enterprise)$", options: .caseInsensitive)
+    func isPlan(_ l: String) -> Bool { re.firstMatch(in: l, range: NSRange(l.startIndex..., in: l)) != nil }
+    let lines = text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    // The plan name is the line right under the "Usage" heading; other "Max"/"Pro" lines (menus, upsells) are ignored.
+    for (i, l) in lines.enumerated() where (l == "사용량" || l == "Usage") && i + 1 < lines.count && isPlan(lines[i + 1]) {
+        return lines[i + 1]
+    }
+    return lines.last(where: isPlan)
 }
 
 func parseUsageText(_ text: String) -> [WebItem] {
     let lines = text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-    let pct = try! NSRegularExpression(pattern: "(\\d{1,3})\\s*%")
+    // Only lines that are just a percentage ("3% 사용됨", "3% used", or a bare "61%"), not prose like "100% of your limit".
+    let pct = try! NSRegularExpression(pattern: "^(\\d{1,3})\\s*%(\\s*(사용됨|used))?$", options: .caseInsensitive)
     let resetWords = ["재설정", "초기화", "Resets", "resets", "reset"]
     var items: [WebItem] = []
     for (i, line) in lines.enumerated() {
@@ -31,7 +37,9 @@ func parseUsageText(_ text: String) -> [WebItem] {
         var label = ""
         for j in stride(from: i - 1, through: max(0, i - 4), by: -1) {
             let c = lines[j]
-            if !c.contains("%") && !resetWords.contains(where: { c.contains($0) }) { label = c; break }
+            // Skip icon-only lines (tooltip glyphs etc.): a real label has at least one letter.
+            let hasLetter = c.contains { $0.isLetter }
+            if hasLetter && !c.contains("%") && !resetWords.contains(where: { c.contains($0) }) { label = c; break }
         }
         // The reset-time line sits directly above the percent line on claude.ai.
         var reset: String?
