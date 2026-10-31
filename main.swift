@@ -12,7 +12,58 @@ func L(_ ko: String, _ en: String) -> String { isKorean ? ko : en }
 
 // MARK: - Reading claude.ai Settings > Usage (web view, user signs in)
 
-struct WebItem { let label: String; let percent: Int; let reset: String? }
+struct WebItem { let label: String; let percent: Int; let reset: String?; var kind: String = "" }
+
+func parseISODate(_ s: String) -> Date? {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let d = f.date(from: s) { return d }
+    f.formatOptions = [.withInternetDateTime]
+    // Microsecond fractions ("...00.570606+00:00") are not always accepted; drop them and retry.
+    return f.date(from: s.replacingOccurrences(of: "\\.\\d+", with: "", options: .regularExpression))
+}
+
+func resetText(_ raw: Date) -> String {
+    // The API reports times like 07:59:59; round to the nearest minute so they read as 8:00.
+    let d = Date(timeIntervalSinceReferenceDate: (raw.timeIntervalSinceReferenceDate / 60).rounded() * 60)
+    let f = DateFormatter()
+    f.locale = Locale.current
+    f.setLocalizedDateFormatFromTemplate(d.timeIntervalSinceNow < 86400 ? "jmm" : "EEE jmm")
+    return L("\(f.string(from: d))에 초기화", "Resets \(f.string(from: d))")
+}
+
+/// Parses the JSON the usage page itself loads (/api/organizations/<id>/usage). It is language independent and
+/// includes model-specific weekly limits (e.g. Fable) that the page text does not show.
+func parseUsageJSON(_ s: String) -> (cards: [WebItem], breakdown: [WebItem])? {
+    guard let data = s.data(using: .utf8),
+          let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let limits = o["limits"] as? [[String: Any]] else { return nil }
+    var cards: [WebItem] = []
+    for l in limits {
+        guard let kind = l["kind"] as? String, let pct = (l["percent"] as? NSNumber)?.intValue else { continue }
+        let reset = (l["resets_at"] as? String).flatMap(parseISODate).map(resetText)
+        let scope = l["scope"] as? [String: Any]
+        let model = (scope?["model"] as? [String: Any])?["display_name"] as? String
+        let label: String
+        switch kind {
+        case "session": label = L("현재 세션 (5시간)", "Current session (5h)")
+        case "weekly_all": label = L("이번 주 · 모든 모델", "This week · all models")
+        case "weekly_scoped": label = L("이번 주 · ", "This week · ") + (model ?? L("특정 모델", "scoped"))
+        default: label = kind.replacingOccurrences(of: "_", with: " ")
+        }
+        cards.append(WebItem(label: label, percent: pct, reset: reset, kind: kind))
+    }
+    guard !cards.isEmpty else { return nil }
+    var breakdown: [WebItem] = []
+    if let rows = (o["seven_day_breakdown"] as? [String: Any])?["rows"] as? [[String: Any]] {
+        for r in rows {
+            if let n = r["display_name"] as? String, let p = (r["percent"] as? NSNumber)?.intValue {
+                breakdown.append(WebItem(label: n, percent: p, reset: nil))
+            }
+        }
+    }
+    return (cards, breakdown)
+}
 
 func parsePlan(_ text: String) -> String? {
     let re = try! NSRegularExpression(pattern: "^(Free|Pro|Max(\\s*\\(?\\d+x\\)?)?|Team|Enterprise)$", options: .caseInsensitive)
@@ -50,9 +101,20 @@ func parseUsageText(_ text: String) -> [WebItem] {
 }
 
 final class WebUsage: NSObject, WKNavigationDelegate {
-    let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 900, height: 700))
+    // Remember the page's own usage API response (no extra requests are made).
+    static let hookJS = #"""
+    (function(){const of=window.fetch;window.fetch=async function(...a){const r=await of.apply(this,a);
+    try{const u=(typeof a[0]==='string')?a[0]:((a[0]&&a[0].url)||'');
+    if(/\/api\/organizations\/[^\/]+\/usage(\?|$)/.test(u)){r.clone().text().then(t=>{if(t.indexOf('"limits"')>=0)window.__cubUsage=t;});}}catch(e){}return r;};})();
+    """#
+    let web: WKWebView = {
+        let c = WKWebViewConfiguration()
+        c.userContentController.addUserScript(WKUserScript(source: WebUsage.hookJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        return WKWebView(frame: NSRect(x: 0, y: 0, width: 900, height: 700), configuration: c)
+    }()
     let window: NSWindow
-    var items: [WebItem] = []
+    var cards: [WebItem] = []
+    var breakdown: [WebItem] = []
     var plan: String?
     var needsLogin = false { didSet {} }
     var onUpdate: (() -> Void)?
@@ -79,14 +141,24 @@ final class WebUsage: NSObject, WKNavigationDelegate {
             let was = self.needsLogin
             self.needsLogin = path.hasPrefix("/login") || path.hasPrefix("/logout")
             if self.needsLogin && !was { self.showWindow() }
-            self.web.evaluateJavaScript("document.body.innerText") { res, _ in
-                let text = (res as? String) ?? ""
-                if !self.needsLogin {
-                    self.items = parseUsageText(text)
-                    self.plan = parsePlan(text)
-                    if self.items.isEmpty == false { self.window.orderOut(nil) }
+            self.web.evaluateJavaScript("window.__cubUsage || ''") { json, _ in
+                self.web.evaluateJavaScript("document.body.innerText") { res, _ in
+                    let text = (res as? String) ?? ""
+                    if !self.needsLogin {
+                        if let parsed = parseUsageJSON((json as? String) ?? "") {
+                            self.cards = parsed.cards
+                            self.breakdown = parsed.breakdown
+                        } else {
+                            // Fallback: scrape the visible page text.
+                            let items = parseUsageText(text)
+                            self.cards = Array(items.prefix(2))
+                            self.breakdown = Array(items.dropFirst(2).filter { !$0.label.isEmpty && $0.label.count < 20 })
+                        }
+                        self.plan = parsePlan(text)
+                        if !self.cards.isEmpty { self.window.orderOut(nil) }
+                    }
+                    self.onUpdate?()
                 }
-                self.onUpdate?()
             }
         }
     }
@@ -132,7 +204,8 @@ func statusIcon() -> NSImage {
 }
 
 final class UsageModel: ObservableObject {
-    @Published var items: [WebItem] = []
+    @Published var cards: [WebItem] = []
+    @Published var breakdown: [WebItem] = []
     @Published var needsLogin = false
     @Published var plan: String?
     @Published var launchAtLogin = false
@@ -197,10 +270,9 @@ struct UsageView: View {
                     Button(L("로그인", "Sign in"), action: m.onLogin).buttonStyle(.borderedProminent).tint(claudeOrange)
                 }.frame(maxWidth: .infinity).padding(16)
                 .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.06)))
-            } else if m.items.count >= 2 {
-                UsageCard(item: m.items[0])
-                UsageCard(item: m.items[1])
-                let rest = Array(m.items.dropFirst(2).filter { !$0.label.isEmpty && $0.label.count < 20 }.prefix(6))
+            } else if !m.cards.isEmpty {
+                ForEach(Array(m.cards.enumerated()), id: \.offset) { _, c in UsageCard(item: c) }
+                let rest = Array(m.breakdown.prefix(6))
                 if !rest.isEmpty {
                     VStack(alignment: .leading, spacing: 7) {
                         Text(L("이번 주 제품별", "This week by product")).font(.system(size: 11, weight: .medium)).foregroundColor(.secondary)
@@ -277,13 +349,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func refresh() { webUsage.reload() }
 
     func render() {
-        model.items = webUsage.items
+        model.cards = webUsage.cards
+        model.breakdown = webUsage.breakdown
         model.plan = webUsage.plan
         model.updatedAt = Date()
         model.needsLogin = webUsage.needsLogin
-        let w = webUsage.items
+        let c = webUsage.cards
+        let session = c.first { $0.kind == "session" } ?? c.first
+        let weekly = c.first { $0.kind == "weekly_all" } ?? (c.count > 1 ? c[1] : nil)
         let text: String
-        if w.count >= 2 { text = "\(w[0].percent)% · \(w[1].percent)%" }
+        if let s = session, let w = weekly { text = "\(s.percent)% · \(w.percent)%" }
         else if webUsage.needsLogin { text = L("로그인", "Sign in") }
         else { text = "…" }
         item.button?.attributedTitle = NSAttributedString(

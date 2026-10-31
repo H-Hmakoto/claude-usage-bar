@@ -11,7 +11,7 @@ Claude 사용량(5시간 세션 / 주간)을 메뉴바에서 바로 보여주는
 
 ## How it works / privacy
 
-The app opens `claude.ai/settings/usage` in an in-app web view and reads the page text.
+The app opens `claude.ai/settings/usage` in an in-app web view and reads the usage data that page itself loads (falling back to the visible page text). This includes model-specific weekly limits such as Fable.
 You sign in once inside that web view (use **Continue with email** — Google blocks sign-in in embedded web views).
 
 - No Claude API tokens, no Keychain access, no requests to any host other than `claude.ai`.
