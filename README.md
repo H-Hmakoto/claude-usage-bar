@@ -5,9 +5,21 @@ Chat, Claude Code and Cowork share the same limits, so one percentage covers all
 
 Claude 사용량(5시간 세션 / 주간)을 메뉴바에서 바로 보여주는 작은 macOS 앱입니다.
 
-- Menu bar: `5% · 76%` (session · weekly). Click for details, reset times, per-product breakdown and your plan.
-- Refreshes every 5 minutes, when you open the popover, and when the Mac wakes up.
+## Features
+
+- **Menu bar:** `5% · 76%` (current session · weekly, all models), with the app icon.
+- **Popover** (click the icon):
+  - a card per limit with percentage, progress bar and reset time: current session (5h), weekly (all models), and model-specific weekly limits such as **Fable**
+  - weekly breakdown by product (Claude Code, chat, Cowork, other)
+  - your plan name (Pro, Max 5x, ...)
+  - colors turn orange at 70% and red at 90%
+- Refreshes every 5 minutes, when you open the popover, with the ↻ button, and when the Mac wakes up.
+- **Launch at login** toggle in the popover.
 - English and Korean UI (follows your system language).
+
+## Updating
+
+There is no auto-update. Download the latest zip from [Releases](../../releases) and replace the app in `/Applications` (your sign-in is kept).
 
 ## How it works / privacy
 
@@ -66,7 +78,10 @@ Claude의 **5시간 세션 / 주간 사용량**을 메뉴바에서 바로 확인
 4. 메뉴바에 아이콘이 생기면 클릭해서 **로그인**을 눌러요.
    - 구글 로그인은 앱 안에서 막혀 있어요. **이메일로 계속하기**로 로그인하세요. (메일로 온 인증 코드를 입력하면 돼요.)
    - 메일에 링크만 오면 링크를 복사해서 브라우저가 아닌 앱 창 주소로 열어야 해요. 코드 입력이 되는 방식을 권해요.
-5. 로그인하면 메뉴바에 `5% · 76%`처럼 (세션 · 주간) 표시돼요. 클릭하면 초기화 시각, 제품별 사용량, 플랜 이름이 보여요.
+5. 로그인하면 메뉴바에 `5% · 76%`처럼 (현재 세션 · 주간) 표시돼요. 클릭하면 아래 정보가 보여요.
+   - 한도별 카드(퍼센트, 막대, 초기화 시각): 현재 세션(5시간), 주간(모든 모델), **Fable** 같은 모델별 주간 한도
+   - 이번 주 제품별 사용량(Claude Code, 채팅, Cowork, 기타)
+   - 플랜 이름(Pro, Max 5x 등), 70% 이상 주황색 / 90% 이상 빨간색 표시
 6. 부팅할 때 자동으로 켜려면 팝오버 아래의 **로그인 시 자동 실행**을 눌러요.
 
 ### 안전한가요?
@@ -81,6 +96,10 @@ Claude의 **5시간 세션 / 주간 사용량**을 메뉴바에서 바로 확인
 - **메뉴바에 아이콘이 안 보여요**: 메뉴바가 꽉 찼거나 노치 뒤에 가려진 거예요. `⌘`를 누른 채 다른 아이콘을 끌어서 빼 보세요.
 - **"로그인"이라고 떠요**: 아이콘 클릭 > 로그인에서 이메일로 다시 로그인하세요.
 - **숫자가 안 바뀌어요**: 5분마다 갱신돼요. 아이콘을 클릭하거나 ↻ 버튼을 누르면 4~5초 뒤에 바로 갱신돼요.
+
+### 업데이트
+
+자동 업데이트는 없어요. [Releases](../../releases)에서 최신 zip을 받아 `/Applications`의 앱을 덮어쓰면 돼요. 로그인은 그대로 유지돼요.
 
 ---
 
