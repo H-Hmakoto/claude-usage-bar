@@ -169,23 +169,31 @@ final class WebUsage: NSObject, WKNavigationDelegate {
 
 let claudeOrange = Color(red: 0.851, green: 0.467, blue: 0.341)   // #D97757
 
-/// App logo: 12 tapered rays (long/short alternating) around a small hub. Original design.
-func burstGeometry(center c: CGPoint, radius R: CGFloat) -> (rays: [[CGPoint]], hub: CGRect) {
-    var rays: [[CGPoint]] = []
+/// App logo: 12 rays rotated 45 degrees, equal length, irregular thickness, rounded tips, small hub.
+/// The rays pointing down are thinner. Original design.
+struct BurstGeometry { var rays: [[CGPoint]]; var tips: [CGRect]; var hub: CGRect }
+
+func burstGeometry(center c: CGPoint, radius R: CGFloat) -> BurstGeometry {
+    let s = R / 42   // designed on a 42-unit radius
+    let widths: [CGFloat] = [6.2, 2.4, 4.8, 2.0, 6.6, 2.8, 5.4, 2.2, 3.6, 3.0, 6.0, 2.6]
+    var rays: [[CGPoint]] = [], tips: [CGRect] = []
     for i in 0..<12 {
-        let a = CGFloat(i) / 12 * 2 * .pi - .pi / 2
-        let L = R * (i % 2 == 0 ? 1.0 : 0.773)
+        let a = (-45 + 30 * CGFloat(i)) * .pi / 180
+        var hb = widths[i]
+        if sin(a) > 0.1 { hb = max(1.4, hb * 0.55) }
+        let ht = hb * 0.45, L = (42 - ht) * s, r0 = 4 * s
         let ux = cos(a), uy = sin(a), px = -uy, py = ux
-        let r0 = R * 0.09, hb = R * 0.095, ht = R * 0.027
         rays.append([
-            CGPoint(x: c.x + ux * r0 + px * hb, y: c.y + uy * r0 + py * hb),
-            CGPoint(x: c.x + ux * L + px * ht, y: c.y + uy * L + py * ht),
-            CGPoint(x: c.x + ux * L - px * ht, y: c.y + uy * L - py * ht),
-            CGPoint(x: c.x + ux * r0 - px * hb, y: c.y + uy * r0 - py * hb),
+            CGPoint(x: c.x + ux * r0 + px * hb * s, y: c.y + uy * r0 + py * hb * s),
+            CGPoint(x: c.x + ux * L + px * ht * s, y: c.y + uy * L + py * ht * s),
+            CGPoint(x: c.x + ux * L - px * ht * s, y: c.y + uy * L - py * ht * s),
+            CGPoint(x: c.x + ux * r0 - px * hb * s, y: c.y + uy * r0 - py * hb * s),
         ])
+        let tr = (ht + 1) * s
+        tips.append(CGRect(x: c.x + ux * L - tr, y: c.y + uy * L - tr, width: 2 * tr, height: 2 * tr))
     }
-    let h = R * 0.18
-    return (rays, CGRect(x: c.x - h, y: c.y - h, width: 2 * h, height: 2 * h))
+    let h = 8 * s
+    return BurstGeometry(rays: rays, tips: tips, hub: CGRect(x: c.x - h, y: c.y - h, width: 2 * h, height: 2 * h))
 }
 
 struct Burst: Shape {
@@ -193,6 +201,7 @@ struct Burst: Shape {
         let g = burstGeometry(center: CGPoint(x: r.midX, y: r.midY), radius: min(r.width, r.height) / 2 - 0.5)
         var p = Path()
         for ray in g.rays { p.addLines(ray); p.closeSubpath() }
+        for t in g.tips { p.addEllipse(in: t) }
         p.addEllipse(in: g.hub)
         return p
     }
@@ -200,16 +209,17 @@ struct Burst: Shape {
 
 struct BurstLogo: View {
     let color: Color
+    let size: CGFloat
     var body: some View {
         ZStack {
             Burst().fill(color)
-            Burst().stroke(color, style: StrokeStyle(lineWidth: 1, lineJoin: .round))   // softens the tips
-        }
+            Burst().stroke(color, style: StrokeStyle(lineWidth: 2 * (size / 2 - 0.5) / 42, lineJoin: .round))
+        }.frame(width: size, height: size)
     }
 }
 
 func statusIcon() -> NSImage {
-    let img = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { r in
+    let img = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { r in   // flipped: y grows downward, like SwiftUI
         let g = burstGeometry(center: NSPoint(x: r.midX, y: r.midY), radius: r.width / 2 - 0.5)
         NSColor.black.setFill()
         NSColor.black.setStroke()
@@ -218,11 +228,12 @@ func statusIcon() -> NSImage {
             path.move(to: ray[0])
             for p in ray.dropFirst() { path.line(to: p) }
             path.close()
-            path.lineWidth = 0.9
+            path.lineWidth = 0.8
             path.lineJoinStyle = .round
             path.fill()
             path.stroke()
         }
+        for t in g.tips { NSBezierPath(ovalIn: t).fill() }
         NSBezierPath(ovalIn: g.hub).fill()
         return true
     }
@@ -281,7 +292,7 @@ struct UsageView: View {
     var body: some View {
         VStack(spacing: 12) {
             HStack(spacing: 8) {
-                BurstLogo(color: claudeOrange).frame(width: 24, height: 24)
+                BurstLogo(color: claudeOrange, size: 24)
                 Text(L("Claude 사용량", "Claude Usage")).font(.system(size: 15, weight: .semibold))
                 if let p = m.plan {
                     Text(p).font(.system(size: 11, weight: .semibold)).foregroundColor(claudeOrange)
